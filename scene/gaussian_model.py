@@ -47,7 +47,7 @@ class GaussianModel:
         self.rotation_activation = torch.nn.functional.normalize
 
 
-    def __init__(self, sh_degree, optimizer_type="default"):
+    def __init__(self, sh_degree, optimizer_type="default", adc=""):
         self.active_sh_degree = 0
         self.optimizer_type = optimizer_type
         self.max_sh_degree = sh_degree  
@@ -65,6 +65,8 @@ class GaussianModel:
         self.spatial_lr_scale = 0
         self.setup_functions()
 
+        self.adc = adc
+
     def capture(self):
         return (
             self.active_sh_degree,
@@ -79,6 +81,7 @@ class GaussianModel:
             self.denom,
             self.optimizer.state_dict(),
             self.spatial_lr_scale,
+            self.adc
         )
     
     def restore(self, model_args, training_args):
@@ -450,7 +453,12 @@ class GaussianModel:
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_tmp_radii)
 
     def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, radii):
-        grads = self.xyz_gradient_accum / self.denom
+        if self.adc == "ema":
+            grads = self.xyz_gradient_accum
+            #print("ema: ",self.denom.min(), self.denom.max(), self.denom.mean())
+        else:
+            grads = self.xyz_gradient_accum / self.denom
+            #print("sma",self.denom.min(), self.denom.max(), self.denom.mean())
         grads[grads.isnan()] = 0.0
 
         self.tmp_radii = radii
@@ -469,5 +477,11 @@ class GaussianModel:
         torch.cuda.empty_cache()
 
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
-        self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
+        if self.adc == "ema":
+            self.xyz_gradient_accum[update_filter] = (
+                (1 - (2/(1+self.denom[update_filter]))) * self.xyz_gradient_accum[update_filter] + 
+                (2/(1+self.denom[update_filter])) * torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
+            )
+        else:
+            self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
         self.denom[update_filter] += 1
