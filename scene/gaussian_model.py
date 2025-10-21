@@ -65,6 +65,8 @@ class GaussianModel:
         self.spatial_lr_scale = 0
         self.setup_functions()
 
+        self.xyz_gradient_last = torch.empty(0)
+
         self.adc = adc
 
     def capture(self):
@@ -81,7 +83,8 @@ class GaussianModel:
             self.denom,
             self.optimizer.state_dict(),
             self.spatial_lr_scale,
-            self.adc
+            self.adc,
+            self.xyz_gradient_last
         )
     
     def restore(self, model_args, training_args):
@@ -96,11 +99,13 @@ class GaussianModel:
         xyz_gradient_accum, 
         denom,
         opt_dict, 
+        xyz_gradient_last,
         self.spatial_lr_scale) = model_args
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
         self.denom = denom
         self.optimizer.load_state_dict(opt_dict)
+        self.xyz_gradient_last = xyz_gradient_last
 
     @property
     def get_scaling(self):
@@ -182,6 +187,8 @@ class GaussianModel:
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+
+        self.xyz_gradient_last = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
 
         l = [
             {'params': [self._xyz], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "xyz"},
@@ -366,6 +373,8 @@ class GaussianModel:
         self.max_radii2D = self.max_radii2D[valid_points_mask]
         self.tmp_radii = self.tmp_radii[valid_points_mask]
 
+        self.xyz_gradient_last = self.xyz_gradient_last[valid_points_mask]
+
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
@@ -409,6 +418,7 @@ class GaussianModel:
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
+        self.xyz_gradient_last = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
     def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
         n_init_points = self.get_xyz.shape[0]
         # Extract points that satisfy the gradient condition
@@ -460,6 +470,7 @@ class GaussianModel:
             grads = self.xyz_gradient_accum / self.denom
             #print("sma",self.denom.min(), self.denom.max(), self.denom.mean())
         grads[grads.isnan()] = 0.0
+        print(self.adc, ",",self.xyz_gradient_accum.mean().item(),",",self.xyz_gradient_accum.size(dim=0), "\n")
 
         self.tmp_radii = radii
         self.densify_and_clone(grads, max_grad, extent)
@@ -482,6 +493,10 @@ class GaussianModel:
                 (1 - (2/(1+self.denom[update_filter]))) * self.xyz_gradient_accum[update_filter] + 
                 (2/(1+self.denom[update_filter])) * torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
             )
+        elif self.adc == "slope":
+            self.xyz_gradient_accum[update_filter] += (torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True) - self.xyz_gradient_last[update_filter])
+            self.xyz_gradient_last[update_filter] = torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
         else:
             self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
+
         self.denom[update_filter] += 1

@@ -40,10 +40,18 @@ try:
 except:
     SPARSE_ADAM_AVAILABLE = False
 
+adc_print = {
+    "ema": "EMC Density Control",
+    "slope": "Slope-based Density Control",
+    "default": "Default Density Control"
+}
+
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, adc):
 
     if not SPARSE_ADAM_AVAILABLE and opt.optimizer_type == "sparse_adam":
         sys.exit(f"Trying to use sparse adam but it is not installed, please install the correct rasterizer using pip install [3dgs_accel].")
+
+    print("\nStarting training with the following density control: \n", adc_print.get(adc, "Unknown Density Control"))
 
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
@@ -268,7 +276,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
 
-    parser.add_argument("--adc", type=str, default="")
+    parser.add_argument("--adc", type=str, default="default", choices=["ema", "slope", "default"])
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
