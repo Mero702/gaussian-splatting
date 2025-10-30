@@ -66,6 +66,9 @@ class GaussianModel:
         self.setup_functions()
 
         self.xyz_gradient_last = torch.empty(0)
+        self.M_current = torch.empty(0)
+        self.m_current = torch.empty(0)
+        self.mean = torch.empty(0)
 
         self.adc = adc
 
@@ -84,7 +87,7 @@ class GaussianModel:
             self.optimizer.state_dict(),
             self.spatial_lr_scale,
             self.adc,
-            self.xyz_gradient_last
+            self.xyz_gradient_last,
         )
     
     def restore(self, model_args, training_args):
@@ -189,6 +192,9 @@ class GaussianModel:
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
 
         self.xyz_gradient_last = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.M_current = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.m_current = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.mean = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
 
         l = [
             {'params': [self._xyz], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "xyz"},
@@ -374,6 +380,9 @@ class GaussianModel:
         self.tmp_radii = self.tmp_radii[valid_points_mask]
 
         self.xyz_gradient_last = self.xyz_gradient_last[valid_points_mask]
+        self.M_current = self.M_current[valid_points_mask]
+        self.m_current = self.m_current[valid_points_mask]
+        self.mean = self.mean[valid_points_mask]
 
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
@@ -419,6 +428,9 @@ class GaussianModel:
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
         self.xyz_gradient_last = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.M_current = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.m_current = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.mean = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
     def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
         n_init_points = self.get_xyz.shape[0]
         # Extract points that satisfy the gradient condition
@@ -470,7 +482,7 @@ class GaussianModel:
             grads = self.xyz_gradient_accum / self.denom
             #print("sma",self.denom.min(), self.denom.max(), self.denom.mean())
         grads[grads.isnan()] = 0.0
-        print(self.adc, ",",self.xyz_gradient_accum.mean().item(),",",self.xyz_gradient_accum.size(dim=0), "\n")
+        print(self.adc, ",",self.xyz_gradient_accum.mean().item(),",",self.xyz_gradient_accum.size(dim=0))
 
         self.tmp_radii = radii
         self.densify_and_clone(grads, max_grad, extent)
@@ -486,7 +498,6 @@ class GaussianModel:
         self.tmp_radii = None
 
         torch.cuda.empty_cache()
-
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         if self.adc == "ema":
             self.xyz_gradient_accum[update_filter] = (
@@ -495,6 +506,25 @@ class GaussianModel:
             )
         elif self.adc == "slope":
             self.xyz_gradient_accum[update_filter] += (torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True) - self.xyz_gradient_last[update_filter])
+            self.xyz_gradient_last[update_filter] = torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
+        elif self.adc == "3d":
+            self.xyz_gradient_accum[update_filter] += torch.norm(self._xyz.grad[update_filter,:3], dim=-1, keepdim=True)
+
+        elif self.adc == "ph":
+            delta = 0.5
+
+            self.mean[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:], dim=-1, keepdim=True)
+            mean_t = torch.zeros_like(self.mean)
+            mean_t[update_filter] = self.mean[update_filter] / (self.denom[update_filter]+1)
+            
+            self.m_current[update_filter] += self.xyz_gradient_last[update_filter] - mean_t[update_filter] - delta
+
+            if self.denom[update_filter].any() == 0:
+                self.M_current[update_filter] = self.m_current[update_filter]
+            else:
+                self.M_current[update_filter] += torch.minimum(self.M_current[update_filter], self.m_current[update_filter])
+            self.xyz_gradient_accum[update_filter] = self.m_current[update_filter] - self.M_current[update_filter]
+
             self.xyz_gradient_last[update_filter] = torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
         else:
             self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
