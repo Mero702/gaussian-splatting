@@ -501,8 +501,8 @@ class GaussianModel:
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         if self.adc == "ema":
             self.xyz_gradient_accum[update_filter] = (
-                (1 - (2/(1+self.denom[update_filter]))) * self.xyz_gradient_accum[update_filter] + 
-                (2/(1+self.denom[update_filter])) * torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
+                (1 - (0.2/(1+self.denom[update_filter]))) * self.xyz_gradient_accum[update_filter] + 
+                (0.2/(1+self.denom[update_filter])) * torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
             )
         elif self.adc == "slope":
             self.xyz_gradient_accum[update_filter] += (torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True) - self.xyz_gradient_last[update_filter])
