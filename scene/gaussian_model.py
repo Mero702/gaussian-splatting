@@ -451,7 +451,7 @@ class GaussianModel:
         padded_grad[:grads.shape[0]] = grads.squeeze()
         selected_pts_mask = torch.where(padded_grad >= grad_threshold, True, False)
 
-        if self.adc == "var":
+        if self.adc == "var" or self.adc == "direction":
             padded_variance = torch.zeros((n_init_points), device="cuda")
             padded_variance[:variance.shape[0]] = variance.squeeze()
             selected_pts_mask = torch.logical_and(selected_pts_mask,
@@ -484,7 +484,7 @@ class GaussianModel:
     def densify_and_clone(self, grads, grad_threshold, scene_extent,iterations, variance, variance_threshold, motion_efficiency, motion_efficiency_treshold):
         # Extract points that satisfy the gradient condition
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
-        if self.adc == "var":
+        if self.adc == "var" or self.adc == "direction":
             selected_pts_mask = torch.logical_and(selected_pts_mask,
                                                   variance.squeeze() >= variance_threshold)
         if self.adc == "direction" and iterations > 5_000:
@@ -511,7 +511,7 @@ class GaussianModel:
             grads = self.xyz_gradient_accum
             grads[grads.isnan()] = 0.0
             #print("ema: ",self.denom.min(), self.denom.max(), self.denom.mean())
-        elif self.adc == "var":
+        elif self.adc == "var" or self.adc == "direction":
             grads = self.xyz_gradient_accum
             grads[grads.isnan()] = 0.0
             grads_square = self.xyz_gradient_accum_square
@@ -523,9 +523,26 @@ class GaussianModel:
             #print("sma",self.denom.min(), self.denom.max(), self.denom.mean())
         if self.adc == "direction":
             motion_efficiency = torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True) / torch.norm(self.xyz_displacement, dim=-1, keepdim=True)
+            motion_efficiency[motion_efficiency.isnan()] = 1.0
+            motion_efficiency[motion_efficiency.isinf()] = 1.0
         #print(self.adc, ",",self.xyz_gradient_accum.mean().item(),",",self.xyz_gradient_accum.size(dim=0))
         #print(self.adc, ",",variance.mean().item(),",",self.xyz_gradient_accum.size(dim=0))
+        # print(self.xyz_displacement.mean().item(),",",torch.norm(self.xyz_displacement, dim=-1).mean().item())
+        # print(torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True).min().item(),",",torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True).mean().item(),",",torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True).max().item())
+        # print(torch.norm(self.xyz_displacement, dim=-1, keepdim=True).min().item(),",",torch.norm(self.xyz_displacement, dim=-1).mean().item(),",",torch.norm(self.xyz_displacement, dim=-1).max().item())
+        print(motion_efficiency.min().item(),",",motion_efficiency.mean().item(),",",motion_efficiency.max().item())
+
         
+        # m = motion_efficiency > 10.0
+        # i = m.nonzero()[0,0].item()
+        # i = np.random.randint(motion_efficiency.shape[0], size=1)[0]
+        # print(i, motion_efficiency[i].item())  
+        # print(self._xyz[i], " - ",self.xyz_start_position[i]," / ", self.xyz_displacement[i]) 
+        # print(self._xyz[i] - self.xyz_start_position[i], " / ",self.xyz_displacement[i])
+        # print(torch.norm(self._xyz[i] - self.xyz_start_position[i],dim=-1, keepdim=True)," / ",torch.norm(self.xyz_displacement[i], dim=-1, keepdim=True))
+        # print(torch.norm(self._xyz[i] - self.xyz_start_position[i],dim=-1, keepdim=True) / torch.norm(self.xyz_displacement[i], dim=-1, keepdim=True))
+
+
         self.tmp_radii = radii
         self.densify_and_clone(grads, max_grad, extent,iterations, variance, variance_threshold, motion_efficiency, motion_efficiency_treshold)
         self.densify_and_split(grads, max_grad, extent,iterations, variance, variance_threshold, motion_efficiency, motion_efficiency_treshold)
@@ -556,10 +573,10 @@ class GaussianModel:
             ) 
 
         if self.adc == "direction":
-            if self.denom.max() > 0 :
+            if self.denom.max() ==  0 :
                 self.xyz_start_position = self._xyz.detach().clone()
                 self.xyz_last_position = self._xyz.detach().clone()
-            self.xyz_displacement[update_filter] = torch.norm(self._xyz[update_filter] - self.xyz_last_position[update_filter], keepdim=True)
-            self.xyz_last_position[update_filter] = self._xyz[update_filter].detach().clone()
+            self.xyz_displacement[update_filter] += torch.norm(self._xyz[update_filter] - self.xyz_last_position[update_filter], keepdim=True)
+            self.xyz_last_position[update_filter] = self._xyz[update_filter]
 
         self.denom[update_filter] += 1
