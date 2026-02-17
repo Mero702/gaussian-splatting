@@ -530,8 +530,9 @@ class GaussianModel:
         # print(self.xyz_displacement.mean().item(),",",torch.norm(self.xyz_displacement, dim=-1).mean().item())
         # print(torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True).min().item(),",",torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True).mean().item(),",",torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True).max().item())
         # print(torch.norm(self.xyz_displacement, dim=-1, keepdim=True).min().item(),",",torch.norm(self.xyz_displacement, dim=-1).mean().item(),",",torch.norm(self.xyz_displacement, dim=-1).max().item())
-        print(motion_efficiency.min().item(),",",motion_efficiency.mean().item(),",",motion_efficiency.max().item())
-
+        # print(motion_efficiency.min().item(),",",motion_efficiency.mean().item(),",",motion_efficiency.max().item())
+        with open("debug.txt", "a") as f:
+            f.write(f"{motion_efficiency.min().item()}, {motion_efficiency.mean().item()}, {motion_efficiency.max().item()}\n")
         
         # m = motion_efficiency > 10.0
         # i = m.nonzero()[0,0].item()

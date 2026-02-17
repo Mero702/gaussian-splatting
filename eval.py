@@ -8,7 +8,8 @@ scenes = ["bicycle", "bonsai", "counter", "flowers", "garden", "kitchen", "room"
 
 commands = ["python train.py --eval", 
     "python train.py --eval --adc ema", 
-    "python train.py --eval --adc var --densify_grad_threshold 0.000125"
+    "python train.py --eval --adc var --densify_grad_threshold 0.000125",
+    "python train.py --eval --adc direction --densify_grad_threshold 0.000125 --motion_efficiency_threshold 0.000125"
     ]
 
 parser = ArgumentParser(description="Full evaluation script parameters")
