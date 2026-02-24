@@ -276,7 +276,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
 
-    parser.add_argument("--adc", type=str, default="default", choices=["ema", "direction", "default", "var"])
+    parser.add_argument("--adc", type=str, default="default", choices=["default", "ema", "var","direction", "all"])
     parser.add_argument("--variance_threshold", type=float, default=2.25e-4, help="Variance threshold for variance-based densification")
     parser.add_argument("--motion_efficiency_threshold", type=float, default=0.5, help="Motion efficiency threshold for direction-based densification")
 

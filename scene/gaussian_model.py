@@ -451,16 +451,16 @@ class GaussianModel:
         padded_grad[:grads.shape[0]] = grads.squeeze()
         selected_pts_mask = torch.where(padded_grad >= grad_threshold, True, False)
 
-        if self.adc == "var" or self.adc == "direction":
+        if self.adc == "var" or self.adc == "all":
             padded_variance = torch.zeros((n_init_points), device="cuda")
             padded_variance[:variance.shape[0]] = variance.squeeze()
             selected_pts_mask = torch.logical_and(selected_pts_mask,
                                                   padded_variance >= variance_threshold)
-        if self.adc == "direction" and iterations > 5_000:
+        if (self.adc == "direction" or self.adc == "all") and iterations > 5_000:
             padded_motion_efficiency = torch.zeros((n_init_points), device="cuda")
             padded_motion_efficiency[:motion_efficiency.shape[0]] = motion_efficiency.squeeze()
             selected_pts_mask = torch.logical_and(selected_pts_mask,
-                                                  padded_motion_efficiency >= motion_efficiency_treshold)
+                                                  padded_motion_efficiency <= motion_efficiency_treshold)
         selected_pts_mask = torch.logical_and(selected_pts_mask,
                                               torch.max(self.get_scaling, dim=1).values > self.percent_dense*scene_extent)
 
@@ -484,10 +484,10 @@ class GaussianModel:
     def densify_and_clone(self, grads, grad_threshold, scene_extent,iterations, variance, variance_threshold, motion_efficiency, motion_efficiency_treshold):
         # Extract points that satisfy the gradient condition
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
-        if self.adc == "var" or self.adc == "direction":
+        if self.adc == "var" or self.adc == "all":
             selected_pts_mask = torch.logical_and(selected_pts_mask,
                                                   variance.squeeze() >= variance_threshold)
-        if self.adc == "direction" and iterations > 5_000:
+        if (self.adc == "direction" or self.adc == "all") and iterations > 5_000:
             selected_pts_mask = torch.logical_and(selected_pts_mask,
                                                   motion_efficiency.squeeze() <= motion_efficiency_treshold)
         selected_pts_mask = torch.logical_and(selected_pts_mask,
@@ -511,7 +511,7 @@ class GaussianModel:
             grads = self.xyz_gradient_accum
             grads[grads.isnan()] = 0.0
             #print("ema: ",self.denom.min(), self.denom.max(), self.denom.mean())
-        elif self.adc == "var" or self.adc == "direction":
+        elif self.adc == "var" or self.adc == "all":
             grads = self.xyz_gradient_accum
             grads[grads.isnan()] = 0.0
             grads_square = self.xyz_gradient_accum_square
@@ -521,7 +521,7 @@ class GaussianModel:
             grads = self.xyz_gradient_accum / self.denom
             grads[grads.isnan()] = 0.0
             #print("sma",self.denom.min(), self.denom.max(), self.denom.mean())
-        if self.adc == "direction":
+        if self.adc == "direction" or self.adc == "all":
             motion_efficiency = torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True) / torch.norm(self.xyz_displacement, dim=-1, keepdim=True)
             motion_efficiency[motion_efficiency.isnan()] = 1.0
             motion_efficiency[motion_efficiency.isinf()] = 1.0
@@ -560,20 +560,20 @@ class GaussianModel:
         torch.cuda.empty_cache()
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         #print(viewspace_point_tensor.grad.shape)
-        if self.adc == "ema" or self.adc == "var" or self.adc == "direction":
+        if self.adc != "default":
             self.xyz_gradient_accum[update_filter] = (
                 (1 - (0.2/(1+self.denom[update_filter]))) * self.xyz_gradient_accum[update_filter] + 
                 (0.2/(1+self.denom[update_filter])) * torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
             )
         else:
             self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
-        if self.adc == "var" or self.adc == "direction":
+        if self.adc == "var" or self.adc == "all":
             self.xyz_gradient_accum_square[update_filter] = (
                 (1 - (0.2/(1+self.denom[update_filter]))) * self.xyz_gradient_accum[update_filter] + 
                 (0.2/(1+self.denom[update_filter])) * (torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True) ** 2)
             ) 
 
-        if self.adc == "direction":
+        if self.adc == "direction" or self.adc == "all":
             if self.denom.max() ==  0 :
                 self.xyz_start_position = self._xyz.detach().clone()
                 self.xyz_last_position = self._xyz.detach().clone()
