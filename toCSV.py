@@ -44,7 +44,7 @@ with open(args.file, 'r', encoding='utf-8') as file:
 
 print("Extracted raw results: ", raw_result)
 
-scenes = ["bicycle", "bonsai", "counter", "flowers", "garden", "kitchen", "room", "stump", "treehill"]
+scenes = ["bicycle", "bonsai", "counter", "flowers", "garden", "kitchen", "room", "stump", "treehill", "chair", "drums", "ficus", "hotdog", "lego", "materials", "mic", "ship", "scene1", "scene6"]
 
 class SceneData:
     def __init__(self):
@@ -52,9 +52,15 @@ class SceneData:
         self.gaussianCount = None
         self.metrics = []
     def toString(self, scene_name):
-        return f"{scene_name}: Training time: {self.training_time}, Gaussian Count: {self.gaussianCount}, Metrics: {self.metrics}"
+        if self.gaussianCount is not None:
+            return f"{scene_name}: Training time: {self.training_time}, Gaussian Count: {self.gaussianCount}, Metrics: {self.metrics}"
+        else:
+            return ""
     def to_csv_row(self, scene_name):
-        return f"{scene_name}, {self.training_time}, {self.gaussianCount}, {', '.join(self.metrics)}\n"
+        if self.gaussianCount is None:
+            return ""
+        else:
+            return f"{scene_name}, {self.training_time}, {self.gaussianCount}, {', '.join(self.metrics)}\n"
     
 
 scene_data = {scene: SceneData() for scene in scenes}
@@ -62,7 +68,7 @@ last_scene = ""
 for x in raw_result:
     line = []
     
-    if x.isalpha():
+    if x in scenes:
         last_scene = x
     elif last_scene != "":
         if ':' in x:
@@ -73,6 +79,8 @@ for x in raw_result:
             scene_data[last_scene].metrics.append(x)
 
 print("Organized scene data: ", "\n".join([s.toString(sn) for sn, s in scene_data.items()]))
+print("Scene, Training Time, Gaussian Count, SSIM, PSNR, LPIPS")
+print("".join([s.to_csv_row(sn) for sn, s in scene_data.items()]))
 
 csv_file_path = os.path.join(os.path.dirname(args.file), os.path.basename(args.file).replace(".txt", "_summary.csv"))
 with open(csv_file_path, 'w', encoding='utf-8') as csv_file:

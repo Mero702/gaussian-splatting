@@ -507,43 +507,22 @@ class GaussianModel:
     def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, radii, iterations, variance_threshold, motion_efficiency_treshold):
         variance = torch.empty(0)
         motion_efficiency = torch.empty(0)
-        if self.adc == "ema":
+        if self.adc != "default": # exponential moving average
             grads = self.xyz_gradient_accum
             grads[grads.isnan()] = 0.0
-            #print("ema: ",self.denom.min(), self.denom.max(), self.denom.mean())
-        elif self.adc == "var" or self.adc == "all":
-            grads = self.xyz_gradient_accum
+        else: 
+            grads = self.xyz_gradient_accum / self.denom
             grads[grads.isnan()] = 0.0
+        if self.adc == "var" or self.adc == "all":
             grads_square = self.xyz_gradient_accum_square
             grads_square[grads_square.isnan()] = 0.0
             variance = torch.abs(grads_square - (grads**2))
-        else:
-            grads = self.xyz_gradient_accum / self.denom
-            grads[grads.isnan()] = 0.0
-            #print("sma",self.denom.min(), self.denom.max(), self.denom.mean())
+
         if self.adc == "direction" or self.adc == "all":
             motion_efficiency = torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True) / torch.norm(self.xyz_displacement, dim=-1, keepdim=True)
             motion_efficiency[motion_efficiency.isnan()] = 1.0
             motion_efficiency[motion_efficiency.isinf()] = 1.0
-        #print(self.adc, ",",self.xyz_gradient_accum.mean().item(),",",self.xyz_gradient_accum.size(dim=0))
-        #print(self.adc, ",",variance.mean().item(),",",self.xyz_gradient_accum.size(dim=0))
-        # print(self.xyz_displacement.mean().item(),",",torch.norm(self.xyz_displacement, dim=-1).mean().item())
-        # print(torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True).min().item(),",",torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True).mean().item(),",",torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True).max().item())
-        # print(torch.norm(self.xyz_displacement, dim=-1, keepdim=True).min().item(),",",torch.norm(self.xyz_displacement, dim=-1).mean().item(),",",torch.norm(self.xyz_displacement, dim=-1).max().item())
-        # print(motion_efficiency.min().item(),",",motion_efficiency.mean().item(),",",motion_efficiency.max().item())
-        with open("debug.txt", "a") as f:
-            f.write(f"{motion_efficiency.min().item()}, {motion_efficiency.mean().item()}, {motion_efficiency.max().item()}\n")
         
-        # m = motion_efficiency > 10.0
-        # i = m.nonzero()[0,0].item()
-        # i = np.random.randint(motion_efficiency.shape[0], size=1)[0]
-        # print(i, motion_efficiency[i].item())  
-        # print(self._xyz[i], " - ",self.xyz_start_position[i]," / ", self.xyz_displacement[i]) 
-        # print(self._xyz[i] - self.xyz_start_position[i], " / ",self.xyz_displacement[i])
-        # print(torch.norm(self._xyz[i] - self.xyz_start_position[i],dim=-1, keepdim=True)," / ",torch.norm(self.xyz_displacement[i], dim=-1, keepdim=True))
-        # print(torch.norm(self._xyz[i] - self.xyz_start_position[i],dim=-1, keepdim=True) / torch.norm(self.xyz_displacement[i], dim=-1, keepdim=True))
-
-
         self.tmp_radii = radii
         self.densify_and_clone(grads, max_grad, extent,iterations, variance, variance_threshold, motion_efficiency, motion_efficiency_treshold)
         self.densify_and_split(grads, max_grad, extent,iterations, variance, variance_threshold, motion_efficiency, motion_efficiency_treshold)
@@ -559,7 +538,6 @@ class GaussianModel:
 
         torch.cuda.empty_cache()
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
-        #print(viewspace_point_tensor.grad.shape)
         if self.adc != "default":
             self.xyz_gradient_accum[update_filter] = (
                 (1 - (0.2/(1+self.denom[update_filter]))) * self.xyz_gradient_accum[update_filter] + 
@@ -567,6 +545,7 @@ class GaussianModel:
             )
         else:
             self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
+
         if self.adc == "var" or self.adc == "all":
             self.xyz_gradient_accum_square[update_filter] = (
                 (1 - (0.2/(1+self.denom[update_filter]))) * self.xyz_gradient_accum[update_filter] + 
