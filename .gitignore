@@ -8,5 +8,5 @@ tensorboard_3d
 screenshots
 data
 eval
-submodules
 submodules/simple-knn
+submodules/fused-ssim
