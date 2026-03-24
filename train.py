@@ -121,8 +121,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         #T_mean = T_mean + (T_value - T_mean) / T_count
         T_mean += T_value.detach()
 
-        del T_value
-        torch.cuda.empty_cache()
         if T_mean.shape[0] != radii.shape[0]:
             print("Mismatch ",T_mean.shape, radii.shape)
 
