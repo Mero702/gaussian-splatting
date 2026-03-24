@@ -119,8 +119,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             
         T_count[T_value > 0]+= 1
         #T_mean = T_mean + (T_value - T_mean) / T_count
-        T_mean += T_value
-        print(T_mean.shape, T_mean.mean().item())
+        T_mean += T_value.detach()
+
+        del T_value
+        torch.cuda.empty_cache()
+        if T_mean.shape[0] != radii.shape[0]:
+            print("Mismatch ",T_mean.shape, radii.shape)
 
         if viewpoint_cam.alpha_mask is not None:
             alpha_mask = viewpoint_cam.alpha_mask.cuda()
@@ -180,7 +184,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     
                     T_mean = T_mean / (T_count + 1e-8)
-                    print(T_mean.shape, T_mean.mean().item(), T_mean.min().item(), T_mean.max().item())
                     gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold, radii, T_mean, opt.prune_threshold if opt.adaptive_pruning else None)
                     T_mean = None
                     T_count = None

@@ -463,6 +463,9 @@ class GaussianModel:
             big_points_ws = self.get_scaling.max(dim=1).values > 0.1 * extent
             prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
             if prune_threshold is not None:
+                if self.get_xyz.shape[0] > mean_T.shape[0]:
+                    padding = torch.ones((self.get_xyz.shape[0] - mean_T.shape[0],), device=mean_T.device, dtype=mean_T.dtype)
+                    mean_T = torch.cat([mean_T, padding], dim=0)
                 prune_mask = torch.logical_or(prune_mask, mean_T < prune_threshold)
         self.prune_points(prune_mask)
         tmp_radii = self.tmp_radii
