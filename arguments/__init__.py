@@ -97,6 +97,8 @@ class OptimizationParams(ParamGroup):
         self.depth_l1_weight_final = 0.01
         self.random_background = False
         self.optimizer_type = "default"
+        self.variance_threshold = 2.25e-4
+        self.motion_efficiency_treshold = 0.5
         self.adaptive_pruning = False
         self.prune_threshold = 0.0001
         super().__init__(parser, "Optimization Parameters")
