@@ -504,7 +504,12 @@ class GaussianModel:
 
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_tmp_radii)
 
-    def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, radii, iterations, variance_threshold, motion_efficiency_treshold):
+    def densify_and_prune(self, opt, min_opacity, extent, max_screen_size, radii, iterations, mean_T, args):
+        max_grad = opt.densify_grad_threshold
+        variance_threshold = opt.densify_grad_threshold
+        motion_efficiency_treshold = opt.densify_grad_threshold
+        prune_threshold = opt.densify_grad_threshold
+
         variance = torch.empty(0)
         motion_efficiency = torch.empty(0)
         if self.adc != "default": # exponential moving average
@@ -532,6 +537,11 @@ class GaussianModel:
             big_points_vs = self.max_radii2D > max_screen_size
             big_points_ws = self.get_scaling.max(dim=1).values > 0.1 * extent
             prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
+            if args.prune_strategy != "false":
+                if self.get_xyz.shape[0] > mean_T.shape[0]:
+                    padding = torch.ones((self.get_xyz.shape[0] - mean_T.shape[0],), device=mean_T.device, dtype=mean_T.dtype)
+                    mean_T = torch.cat([mean_T, padding], dim=0)
+                prune_mask = torch.logical_or(prune_mask, mean_T < prune_threshold)
         self.prune_points(prune_mask)
         tmp_radii = self.tmp_radii
         self.tmp_radii = None

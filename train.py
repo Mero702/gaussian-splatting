@@ -40,22 +40,14 @@ try:
 except:
     SPARSE_ADAM_AVAILABLE = False
 
-adc_print = {
-    "ema": "EMC Density Control",
-    "slope": "Slope-based Density Control",
-    "default": "Default Density Control"
-}
-
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, adc, variance_threshold, motion_efficiency_threshold):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, args):
 
     if not SPARSE_ADAM_AVAILABLE and opt.optimizer_type == "sparse_adam":
         sys.exit(f"Trying to use sparse adam but it is not installed, please install the correct rasterizer using pip install [3dgs_accel].")
 
-    print("\nStarting training with the following density control: \n", adc_print.get(adc, "Unknown Density Control"))
-
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
-    gaussians = GaussianModel(dataset.sh_degree, opt.optimizer_type, adc)
+    gaussians = GaussianModel(dataset.sh_degree, opt.optimizer_type, args.adc)
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
     if checkpoint:
@@ -78,6 +70,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
+    T_mean = None
+    T_count = None
     for iteration in range(first_iter, opt.iterations + 1):
         if network_gui.conn == None:
             network_gui.try_connect()
@@ -117,7 +111,27 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg, use_trained_exp=dataset.train_test_exp, separate_sh=SPARSE_ADAM_AVAILABLE)
-        image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        image, viewspace_point_tensor, visibility_filter, radii, T_value = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["mean_T"]
+
+        if T_mean is None:
+            T_mean = torch.zeros_like(T_value)
+            T_count = torch.zeros_like(T_value)
+
+            
+        if args.prune_strategy == "default":
+            T_count[T_value > 0]+= 1
+            #T_mean = T_mean + (T_value - T_mean) / T_count
+            T_mean += T_value.detach()
+        else: 
+            t = T_value.detach()
+            T_mean[T_value > 0] = (
+                (1 - (0.2/(1+T_count[T_value > 0]))) * T_mean[T_value > 0] + 
+                (0.2/(1+T_count[T_value > 0])) * t[T_value > 0]
+            )
+            T_count[T_value > 0]+= 1
+
+        if T_mean.shape[0] != radii.shape[0]:
+            print("Mismatch ",T_mean.shape, radii.shape)
 
         if viewpoint_cam.alpha_mask is not None:
             alpha_mask = viewpoint_cam.alpha_mask.cuda()
@@ -146,7 +160,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             Ll1depth = Ll1depth.item()
         else:
             Ll1depth = 0
-
         loss.backward()
 
         iter_end.record()
@@ -157,7 +170,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             ema_Ll1depth_for_log = 0.4 * Ll1depth + 0.6 * ema_Ll1depth_for_log
 
             if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}", "Depth Loss": f"{ema_Ll1depth_for_log:.{7}f}", "Points": f"{gaussians.get_xyz.shape[0]}"})
+                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}", "Depth Loss": f"{ema_Ll1depth_for_log:.{7}f}", "Gaussians": gaussians.get_xyz.shape[0]})
                 progress_bar.update(10)
             if iteration == opt.iterations:
                 progress_bar.close()
@@ -176,7 +189,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold, radii, iteration, variance_threshold, motion_efficiency_threshold)
+                    if args.prune_strategy == "default":
+                        T_mean = T_mean / (T_count + 1e-8)
+                    gaussians.densify_and_prune(opt, 0.005, scene.cameras_extent, size_threshold, radii,iteration, T_mean, args)
+                    T_mean = None
+                    T_count = None
                 
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
@@ -249,7 +266,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                     psnr_test += psnr(image, gt_image).mean().double()
                 psnr_test /= len(config['cameras'])
                 l1_test /= len(config['cameras'])          
-                print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
+                print("\n[ITER {}] Evaluating {}: L1 {} PSNR {} Gaussians: {}".format(iteration, config['name'], l1_test, psnr_test, scene.gaussians.get_xyz.shape[0]))
                 if tb_writer:
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
@@ -277,9 +294,8 @@ if __name__ == "__main__":
     parser.add_argument("--start_checkpoint", type=str, default = None)
 
     parser.add_argument("--adc", type=str, default="default", choices=["default", "ema", "var","direction", "all"])
-    parser.add_argument("--variance_threshold", type=float, default=2.25e-4, help="Variance threshold for variance-based densification")
-    parser.add_argument("--motion_efficiency_threshold", type=float, default=0.5, help="Motion efficiency threshold for direction-based densification")
-
+    parser.add_argument("--prune_strategy", type=str, default="default", choices=["default", "false", "ema"])
+    
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -292,7 +308,7 @@ if __name__ == "__main__":
     if not args.disable_viewer:
         network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.adc, args.variance_threshold, args.motion_efficiency_threshold)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args)
 
     # All done
     print("\nTraining complete.")

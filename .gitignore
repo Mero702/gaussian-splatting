@@ -10,4 +10,6 @@ data
 submodules
 SIBR_viewers
 eval
+submodules/simple-knn
+submodules/fused-ssim
 evalrep
