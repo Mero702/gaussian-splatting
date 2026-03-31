@@ -10,3 +10,4 @@ data
 eval
 submodules/simple-knn
 submodules/fused-ssim
+evalrep

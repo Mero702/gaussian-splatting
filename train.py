@@ -116,10 +116,19 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if T_mean is None:
             T_mean = torch.zeros_like(T_value)
             T_count = torch.zeros_like(T_value)
+
             
-        T_count[T_value > 0]+= 1
-        #T_mean = T_mean + (T_value - T_mean) / T_count
-        T_mean += T_value.detach()
+        if args.prune_strategy == "default":
+            T_count[T_value > 0]+= 1
+            #T_mean = T_mean + (T_value - T_mean) / T_count
+            T_mean += T_value.detach()
+        else: 
+            t = T_value.detach()
+            T_mean[T_value > 0] = (
+                (1 - (0.2/(1+T_count[T_value > 0]))) * T_mean[T_value > 0] + 
+                (0.2/(1+T_count[T_value > 0])) * t[T_value > 0]
+            )
+            T_count[T_value > 0]+= 1
 
         if T_mean.shape[0] != radii.shape[0]:
             print("Mismatch ",T_mean.shape, radii.shape)
@@ -180,8 +189,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    
-                    T_mean = T_mean / (T_count + 1e-8)
+                    if args.prune_strategy == "default":
+                        T_mean = T_mean / (T_count + 1e-8)
                     gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold, radii, T_mean, opt.prune_threshold if opt.adaptive_pruning else None)
                     T_mean = None
                     T_count = None
@@ -283,6 +292,7 @@ if __name__ == "__main__":
     parser.add_argument('--disable_viewer', action='store_true', default=False)
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--prune_strategy", type=str, default="default", choices=["default", "ema"])
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
