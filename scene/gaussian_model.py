@@ -202,9 +202,9 @@ class GaussianModel:
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
 
         self.xyz_gradient_accum_square = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
-        self.xyz_start_position = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
-        self.xyz_last_position = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
-        self.xyz_displacement = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
+        self.xyz_start_position = self.get_xyz.clone().detach()
+        self.xyz_last_position = self.get_xyz.clone().detach()
+        self.xyz_displacement = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.mean = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
 
         l = [
@@ -440,9 +440,9 @@ class GaussianModel:
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
         self.xyz_gradient_accum_square = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
-        self.xyz_start_position = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
-        self.xyz_last_position = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
-        self.xyz_displacement = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
+        self.xyz_start_position = self.get_xyz.clone().detach()
+        self.xyz_last_position = self.get_xyz.clone().detach()
+        self.xyz_displacement = torch.zeros((self.get_xyz.shape[0],1), device="cuda")
         self.mean = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
     def densify_and_split(self, grads, grad_threshold, scene_extent, iterations, variance, variance_threshold, motion_efficiency, motion_efficiency_treshold, N=2):
         n_init_points = self.get_xyz.shape[0]
@@ -455,8 +455,8 @@ class GaussianModel:
             padded_variance = torch.zeros((n_init_points), device="cuda")
             padded_variance[:variance.shape[0]] = variance.squeeze()
             selected_pts_mask = torch.logical_and(selected_pts_mask,
-                                                  padded_variance >= variance_threshold)
-        if (self.adc == "direction" or self.adc == "all") and iterations > 5_000:
+                                                  padded_variance <= variance_threshold)
+        if (self.adc == "direction" or self.adc == "all") and iterations > 0:
             padded_motion_efficiency = torch.zeros((n_init_points), device="cuda")
             padded_motion_efficiency[:motion_efficiency.shape[0]] = motion_efficiency.squeeze()
             selected_pts_mask = torch.logical_and(selected_pts_mask,
@@ -486,8 +486,8 @@ class GaussianModel:
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
         if self.adc == "var" or self.adc == "all":
             selected_pts_mask = torch.logical_and(selected_pts_mask,
-                                                  variance.squeeze() >= variance_threshold)
-        if (self.adc == "direction" or self.adc == "all") and iterations > 5_000:
+                                                  variance.squeeze() <= variance_threshold)
+        if (self.adc == "direction" or self.adc == "all") and iterations > 0:
             selected_pts_mask = torch.logical_and(selected_pts_mask,
                                                   motion_efficiency.squeeze() <= motion_efficiency_treshold)
         selected_pts_mask = torch.logical_and(selected_pts_mask,
@@ -506,9 +506,9 @@ class GaussianModel:
 
     def densify_and_prune(self, opt, min_opacity, extent, max_screen_size, radii, iterations, mean_T, args):
         max_grad = opt.densify_grad_threshold
-        variance_threshold = opt.densify_grad_threshold
-        motion_efficiency_treshold = opt.densify_grad_threshold
-        prune_threshold = opt.densify_grad_threshold
+        variance_threshold = opt.variance_threshold
+        motion_efficiency_treshold = opt.motion_efficiency_treshold
+        prune_threshold = opt.prune_threshold
 
         variance = torch.empty(0)
         motion_efficiency = torch.empty(0)
@@ -524,10 +524,9 @@ class GaussianModel:
             variance = torch.abs(grads_square - (grads**2))
 
         if self.adc == "direction" or self.adc == "all":
-            motion_efficiency = torch.norm(self._xyz - self.xyz_start_position,dim=-1, keepdim=True) / torch.norm(self.xyz_displacement, dim=-1, keepdim=True)
-            motion_efficiency[motion_efficiency.isnan()] = 1.0
-            motion_efficiency[motion_efficiency.isinf()] = 1.0
-        
+            motion_efficiency = torch.norm(self.xyz_last_position - self.xyz_start_position,dim=-1, keepdim=True) / self.xyz_displacement
+            motion_efficiency[self.xyz_displacement == 0] = 1.0
+        #print(variance.mean(), variance.min(), variance.max())
         self.tmp_radii = radii
         self.densify_and_clone(grads, max_grad, extent,iterations, variance, variance_threshold, motion_efficiency, motion_efficiency_treshold)
         self.densify_and_split(grads, max_grad, extent,iterations, variance, variance_threshold, motion_efficiency, motion_efficiency_treshold)
@@ -563,10 +562,7 @@ class GaussianModel:
             ) 
 
         if self.adc == "direction" or self.adc == "all":
-            if self.denom.max() ==  0 :
-                self.xyz_start_position = self._xyz.detach().clone()
-                self.xyz_last_position = self._xyz.detach().clone()
-            self.xyz_displacement[update_filter] += torch.norm(self._xyz[update_filter] - self.xyz_last_position[update_filter], keepdim=True)
+            self.xyz_displacement[update_filter] += torch.norm(self._xyz[update_filter] - self.xyz_last_position[update_filter], dim=-1,keepdim=True)
             self.xyz_last_position[update_filter] = self._xyz[update_filter]
 
         self.denom[update_filter] += 1
