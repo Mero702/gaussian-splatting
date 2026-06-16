@@ -15,9 +15,10 @@ args = parser.parse_args()
 
 re_name = re.compile(r"\.\/eval\/[0-9a-f-]+\/(\w+)")
 
-re_train = re.compile(r"30000\/30000 \[(\d+:\d+)<[^P]+[\w]+=(\d+)")
+#re_train = re.compile(r"30000\/30000 \[(\d+:\d+)<[^P]+[\w]+=(\d+)")
+re_train = re.compile(r"Report: Gaussians:(\d+), Time:(\d+:\d+)")
 
-re_metrics = re.compile(r"(?:SSIM|PSNR|LPIPS)(?: :|:)[\s]+(\d+.\d+)")
+re_metrics = re.compile(r"(?:SSIM|PSNR|LPIPS|L1_LOSS)(?: :|:)[\s]+(\d+.\d+)")
 raw_result = []
 
 
@@ -44,7 +45,7 @@ with open(args.file, 'r', encoding='utf-8') as file:
 
 print("Extracted raw results: ", raw_result)
 
-scenes = ["bicycle", "bonsai", "counter", "flowers", "garden", "kitchen", "room", "stump", "treehill", "chair", "drums", "ficus", "hotdog", "lego", "materials", "mic", "ship", "scene1", "scene6"]
+scenes = ["bicycle", "bonsai", "counter", "flowers", "garden", "kitchen", "room", "stump", "treehill", "chair", "drums", "ficus", "hotdog", "lego", "materials", "mic", "ship", "scene1", "scene6","auditorium", "barn", "church", "courtroom", "francis", "ignatius", "m60", "museum", "panther", "temple", "truck", "ballroom", "caterpillar", "courthouse", "family", "horse", "lighthouse", "meetingroom", "palace", "playground", "train"]
 
 class SceneData:
     def __init__(self):
@@ -79,11 +80,11 @@ for x in raw_result:
             scene_data[last_scene].metrics.append(x)
 
 print("Organized scene data: ", "\n".join([s.toString(sn) for sn, s in scene_data.items()]))
-print("Scene, Training Time, Gaussian Count, SSIM, PSNR, LPIPS")
+print("Scene, Training Time, Gaussian Count, SSIM, PSNR, LPIPS, L1_LOSS")
 print("".join([s.to_csv_row(sn) for sn, s in scene_data.items()]))
 
 csv_file_path = os.path.join(os.path.dirname(args.file), os.path.basename(args.file).replace(".txt", "_summary.csv"))
 with open(csv_file_path, 'w', encoding='utf-8') as csv_file:
-    csv_file.write("Scene, Training Time, Gaussian Count, SSIM, PSNR, LPIPS\n")
+    csv_file.write("Scene, Training Time, Gaussian Count, SSIM, PSNR, LPIPS, L1_LOSS\n")
     for scene_name, data in scene_data.items():
         csv_file.write(data.to_csv_row(scene_name))
